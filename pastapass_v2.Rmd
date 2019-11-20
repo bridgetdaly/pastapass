@@ -1,0 +1,406 @@
+---
+title: "Pasta Pass Analysis"
+output: 
+  flexdashboard::flex_dashboard:
+    logo: logo.png
+    vertical_layout: scroll
+    css: theme_bridge.css
+---
+
+```{r setup, include=FALSE}
+
+#Load required packages
+setwd("C:/Users/Bridget/Documents/PastaPass")
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(knitr)
+library(kableExtra)
+
+#Set custom ggplot theme
+ogPalette <- c("#A7AE00","#9A3324","#552F1A","#E3E0DB","#EDECEA")
+
+theme_bridge <- function (base_size = 12)
+{
+  theme_classic(base_size = base_size) +
+    theme(axis.title.x = element_text(margin = margin(t=10)),
+          axis.title.y = element_text(margin = margin(r=10)),
+          axis.text.x=element_text(hjust=1,angle=45),
+          axis.ticks.x=element_blank(),
+          legend.text=element_text(size=rel(1.05)),
+          legend.title=element_text(size=rel(1.1))
+    )
+}
+
+#Custom functions to format data
+as.money <- function(x) {
+  paste0('$',formatC(as.numeric(x),format='f',digits=2,big.mark=','))
+}
+
+#Load and clean data
+food <- read_csv("food.csv")
+
+leftovers <- read_csv("leftovers.csv") %>% 
+  mutate(Date_ID=Date_ID %>% as.POSIXct(format="%d-%b-%y",tz="EST"))
+
+people <- read_csv("people.csv") %>% 
+  mutate(Guest=if_else(Guest!="",TRUE,FALSE)) %>% 
+  group_by(Visit_ID,Dom,Joe,Megan,Guest) %>% tally(Guest) %>% 
+  mutate(Guest=if_else(is.na(Guest),FALSE,Guest),
+         Num_Pals = Dom+Joe+Megan,
+         Num_Guests = n,
+         Party_Size = Num_Pals+Num_Guests+1) %>% 
+  select(-n)
+
+guests <- read_csv("people.csv") %>% 
+  filter(!is.na(Guest)) %>% 
+  mutate(Guest_Cost=Guest_Cost %>% as.character() %>% str_replace("[$]","") %>% as.double()) %>% 
+  select(Visit_ID,Guest,Guest_Cost)
+
+breadsticks <- read_csv("breadsticks.csv") %>% 
+  mutate(Date_ID=Date_ID %>% as.POSIXct(format="%d-%b-%y",tz="EST"))
+
+cost <- read_csv("cost.csv") %>%
+  mutate(Cost=Cost %>% as.character() %>% str_replace("[$]","") %>% as.double(),
+         Tip=Tip %>% as.character() %>% str_replace("[$]","") %>% as.double(),
+         Extra=Extra %>% as.character() %>% str_replace("[$]","") %>% as.double())
+
+dates <- read_csv("dates.csv") %>% 
+  mutate(Date_ID=Date_ID %>% as.POSIXct(format="%d-%b-%y",tz="EST"),
+         Arrival_Time=Arrival_Time %>% as.POSIXct(format="%r"),
+         Food_Time=Food_Time %>% as.POSIXct(format="%r"),
+         Leave_Time=Leave_Time %>% as.POSIXct(format="%r"),
+         Wait_Time = (Food_Time - Arrival_Time) %>% as.integer(),
+         Dine_Time = (Leave_Time - Arrival_Time) %>% as.integer())
+
+expenses <- read_csv("expenses_clean.csv") %>%
+  mutate(Date_ID = Date_ID %>% as.POSIXct(format="%m/%d/%Y"),
+         krog_flag = if_else(cat=="GROCERY","KROGER",
+                             if_else(desc=="OLIVE GARDEN","OLIVE GARDEN",
+                                     if_else(cat=="FOOD","EATING OUT","OTHER (NON FOOD)"))))
+
+```
+
+Overview {data-orientation=rows}
+===================================
+
+Welcome {.sidebar data-width=300}
+------------------------------
+
+September 25, 2017 should have been a day like any other, but due to an impulsive decision made under high pressure, September 25 marked the start of a journey that would challenge my mental and physical limits and that would change my way of living for the following 8 weeks. That Monday was Day 1 of the Olive Garden Pasta Pass providing me, the lucky purchaser, with 56 days of unlimited never ending pasta bowls, soup or salad, and breadsticks.
+
+I decided to make what seemed like a worthless purchase into a worthwhile endeavor, making notes and collecting many data points about each visit in order to share the experience with others and include some more productive activities into my 'extra-curricular' life. The first result of this resolve is a blog, 1 of 22,000: My Pasta Pass Journey (link disabled), which provided a creative outlet for my reflections on this unusual period in my life. The second result is this dashboard, which provided an opportunity to practice using ggplot and flexdashboard.
+
+Please enjoy exploring the tabs and learning more about my Pasta Pass journey!
+
+Row 1 {}
+--------------------------------
+
+### The Basics
+
+I made a total of `r max(food$Visit_ID)` visits to Olive Garden ordering `r max(food$Bowl_ID)` bowls of pasta.
+Taking leftovers into account, I ate Olive Garden `r max(food$Visit_ID) + leftovers %>% filter(Meal_Type != 'Freezer') %>% nrow()` times over 8 weeks. Excluding breakfast, that means pasta bowls made up `r round((max(food$Visit_ID) + leftovers %>% filter(Meal_Type != 'Freezer') %>% nrow())/(8*7*2)*100)`% of my meals.
+
+Joe, Megan, and Dominick also had the pasta pass. While we dined together for many meals, I ventured on `r max(food$Visit_ID) - nrow(people)` solo dines. Additionally over the course of the 8 weeks, `r length(unique(guests$Guest))` guests joined in on the OG experience.
+
+There were `r 7*6*5` possible pasta bowl combinations. While I tried each of the 7 pastas, 6 sauces, and 5 meat toppings, I only made it through `r food %>% select(Pasta,Sauce,Topping) %>% unique() %>% nrow()` unique combinations. All washed down with `r breadsticks %>% select(Bridget) %>% sum()` breadsticks. See the "Food Info" tab for more fun facts related to the meals eaten over the journey.
+
+That many breadsticks really can't be good for a person in the long term can it? Was the 8 weeks of unlimited Olive Garden really worth it? The true cost of my meals at Olive Garden would have been `r sum(cost$Cost) %>% as.money()`. I spent `r '$100.00'`. That's `r (sum(cost$Cost) - 100) %>% as.money()` worth of free pasta! See the "Pass Economics" tab for how this stacks up to my usual food spend.
+
+Finally, how much time did I actually spend at Olive Garden? For each visit, I recorded the time at which I entered the restaurant, recieved my pasta bowl, and left the restaurant. Over the 8 weeks, I spent `r sum(dates$Dine_Time,na.rm=T)` minutes in Olive Garden. (That's `r (sum(dates$Dine_Time,na.rm=T)/60) %>% round(1)` hours!) The average visit time was `r mean(dates$Dine_Time,na.rm=T) %>% round(0)` minutes and the average wait until we received our entrees was `r mean(dates$Wait_Time,na.rm=T) %>% round(0)` minutes. The plot below shows the length of each meal and wait time as well as the location and party size.
+
+
+Row 2 {}
+------------------------------
+
+### Chronology of Pass
+
+```{r chronology}
+chron.plot <- left_join(dates,people) %>% ggplot(aes_string(x="Date_ID", y="Food_Time")) +
+  geom_pointrange(aes(ymin = Arrival_Time, ymax = Leave_Time,
+                      text = paste('Arrival: ',Arrival_Time %>% strftime(format="%l:%M %p",tz="UCT"),'\n',
+                                   'Food: ',Food_Time %>% strftime(format="%l:%M %p",tz="UCT"),'\n',
+                                   'Departure: ',Leave_Time %>% strftime(format="%l:%M %p",tz="UCT"),'\n',
+                                   'Visit Length: ',Leave_Time - Arrival_Time,'minutes \n',
+                                   'Location: ',Location,'\n',
+                                   'Party Size: ',if_else(is.na(Party_Size),1,Party_Size))),
+                  color="#a7ae00") +
+  scale_y_datetime(name = "Time of Day", date_breaks = "1 hour", date_labels = "%l:%M %p") +
+  scale_x_datetime(name = "Date", date_breaks = "1 day", date_labels = "%b %e") +
+  theme_bridge()
+
+ggplotly(chron.plot,tooltip='text') %>% 
+  layout(margin=list(l=100,b=80))
+
+```
+
+Food Info {data-orientation=rows}
+===================================
+
+Row 1
+------------------------------
+
+### Breadsticks
+
+```{r breadsticks}
+
+breadsticks.long <- breadsticks %>% select(-Visit_ID) %>%
+    gather(key="person",value="value",Bridget,Dom,Megan,Joe) %>% 
+  group_by(Date_ID,person) %>% summarise(value=sum(value)) %>% 
+  group_by(person) %>% mutate(cum_value = cumsum(value)) %>% 
+  filter(value > 0) %>% 
+  ungroup()
+
+bs.plot <- breadsticks.long %>% ggplot(aes(x=Date_ID,y=cum_value,color=person,group=person,
+                                          text=paste(person,'\n',
+                                                    'Date: ',Date_ID %>% strftime(format="%b %e"),'\n',
+                                                    'Daily Count: ',value,'\n',
+                                                    'Cumulative Count: ',cum_value))) +
+  geom_point() +
+  geom_line() +
+  scale_y_continuous(name = "Breadsticks", breaks = seq(0,100,5), 
+                     sec.axis=sec_axis(~.*140,name="Calories", breaks = seq(0,14000,1000))) +
+  scale_x_datetime(name = "Date", date_breaks = "1 day", date_labels = "%b %e") +
+  theme_bridge() +
+  theme(legend.title = element_blank(),
+        legend.key.height=unit(5,units="pt"))
+
+ggplotly(bs.plot,tooltip='text') %>% 
+  layout(margin=list(l=100,b=80),
+         legend=list(x=100,y=0.5))
+```
+
+Row 2 {data-height=400}
+------------------------------
+
+### Appetizers
+```{r appetizers}
+
+food %>% group_by(Appetizer) %>% summarise(Meals = n()) %>% arrange(Meals) %>% 
+  kable("html") %>% 
+  kable_styling(full_width = F,position="center")
+
+```
+
+### Pastas
+
+```{r pasta}
+
+pastapie <- ggplot(food) + 
+  geom_bar(aes(x=factor(1), fill=Pasta),width=1) + 
+  labs(x = NULL, y = NULL) +
+  theme(axis.ticks=element_line(linetype=0),
+        axis.text=element_blank(),
+        panel.background=element_rect(fill="white"),
+        legend.key.size=unit(20,units="pt"),
+        legend.text=element_text(size=rel(1.05)),
+        legend.title=element_text(size=rel(1.1))) +
+  coord_polar(theta="y") +
+  scale_fill_brewer(palette="BuPu")
+
+pastapie
+```
+
+Row 3 {data-height=400}
+------------------------------
+
+### Toppings
+```{r toppings}
+topbar <- ggplot(food,aes(x=factor(1),fill=Topping)) +
+  geom_bar() +
+  scale_y_continuous(name="Bowls",limits=c(0,45),expand = c(0, 0)) +
+  theme_bridge() +
+  theme(axis.text.x = element_blank(),
+        axis.title.x = element_blank()) +
+  scale_fill_brewer(palette="BuPu")
+           
+topbar
+```
+
+### Sauces
+```{r sauce,fig.width=8}
+saucebar <- ggplot(food) +
+  geom_bar(aes(x=Sauce)) +
+  scale_y_continuous(name="Bowls",limits=c(0,20),expand = c(0, 0)) +
+  theme_bridge() +
+  theme(axis.title.x = element_blank())
+           
+saucebar
+```
+
+Pass Economics {data-orientation=rows}
+===================================
+
+Row 1
+------------------------------
+
+### Pre Pass Share of Wallet (SOW)
+
+```{r sow_pre}
+#Typical share of wallet going to each category before pasta pass
+exppre <- expenses %>% 
+  mutate(cat=if_else(cat=="FOOD","EATING OUT",cat)) %>% 
+  filter(period=='8wks prior',cat!="PAY") %>% 
+  group_by(cat) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net))
+
+exppre.plot <- exppre %>% ggplot(aes(x=reorder(cat,net),y=prop,
+                                     text=paste('SOW: ',round(prop*100,1),'%')))+
+  geom_bar(stat="identity") +
+  scale_x_discrete(name = "Category") +
+  scale_y_continuous(name = "Share of Wallet",breaks=seq(0,.50,.1),expand=c(0,0)) +
+  theme_bridge()
+
+ggplotly(exppre.plot,tooltip='text') %>% 
+  layout(margin=list(l=70,b=110))
+```
+
+### Impact of Pasta Pass on SOW
+
+```{r sow_pass}
+#How SOW changed pre and post, highlighting food and Kroger
+
+sowdat <- expenses %>% 
+  filter(cat!="PAY") %>% 
+  group_by(period,krog_flag) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net))
+
+sow.plot <- sowdat %>% ggplot(aes(x=period,y=prop,fill=krog_flag,
+                                  text=paste(krog_flag,'\n','SOW: ',round(prop*100,1),'%'))) +
+  geom_bar(stat="identity",position="fill") +
+  labs(x="",y="Share of Wallet") +
+  theme_bridge() +
+  theme(legend.title=element_blank(),
+        axis.text.x=element_text(angle=0,hjust=0)) +
+  scale_fill_manual(values=ogPalette) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggplotly(sow.plot,tooltip='text') %>% 
+  layout(margin=list(l=70),
+         legend=list(x=100,y=0.5))
+```
+
+Row 2
+------------------------------
+
+### Pre Pass Share of Stomach (SOS)
+
+```{r sos_pre}
+#Typical share of stomach going to Kroger before pass
+
+foodpre <- expenses %>% 
+  filter(period=='8wks prior',cat=="FOOD"|cat=="GROCERY") %>% 
+  group_by(desc) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net)) %>% 
+  filter(prop > .02)
+
+foodpre.plot <- foodpre %>% ggplot(aes(x=reorder(desc,net),y=prop,
+                                       text=paste('SOS: ',round(prop*100,1),'%')))+
+  geom_bar(stat="identity") +
+  scale_x_discrete(name = "Retailer") +
+  scale_y_continuous(name = "Share of Stomach",breaks=seq(0,.50,.1),expand=c(0,0)) +
+  theme_bridge()
+
+ggplotly(foodpre.plot,tooltip='text') %>% 
+  layout(margin=list(l=70,b=110))
+```
+
+### Impact of Pasta Pass on SOS
+
+```{r sos_pass}
+#Looking at how SOS changed pre and post, highlighting food and Kroger
+
+sosdat <- expenses %>% 
+  filter(cat=="FOOD"|cat=="GROCERY") %>% 
+  group_by(period,krog_flag) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net))
+
+sosdat.plot <- sosdat %>% ggplot(aes(x=period,y=prop,fill=krog_flag,
+                                     text=paste(krog_flag,'\n','SOS: ',round(prop*100,1),'%'))) +
+  geom_bar(stat="identity",position="fill") +
+  labs(x="",y="Share of Stomach") +
+  theme_bridge() +
+  theme(legend.title=element_blank(),
+        axis.text.x=element_text(angle=0,hjust=0)) +
+    scale_fill_manual(values=ogPalette) +
+  scale_y_continuous(expand = c(0, 0))
+
+ggplotly(sosdat.plot,tooltip='text') %>% 
+  layout(margin=list(l=70,b=110),
+         legend=list(x=100,y=0.5))
+```
+
+Row 3
+------------------------------
+
+### The Pass Dramatically Cut My Food Spending
+
+```{r food_change}
+
+foodchange <- expenses %>% 
+  filter(cat=="FOOD"|cat=="GROCERY") %>% 
+  group_by(period) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net))
+
+foodchange.plot <- foodchange %>% ggplot(aes(x=period,y=-net))+
+  geom_bar(stat="identity",position="dodge") +
+  geom_text(aes(label=paste('$',-net)),nudge_y=50) +
+  labs(x="",y="Total Food Spend ($)") +
+  theme_bridge() +
+  theme(axis.text.x=element_text(angle=0,hjust=.5))
+
+foodchange.plot
+
+```
+
+### Sorry Kroger
+
+```{r krog_change}
+krogchange <- expenses %>% 
+  filter(desc=="KROGER"&cat=="GROCERY") %>% 
+  group_by(period) %>% 
+  summarise(net = sum(amount)) %>% 
+  mutate(prop = net/sum(net))
+
+krogchange.plot <- krogchange %>% ggplot(aes(x=period,y=-net))+
+  geom_bar(stat="identity",position="dodge") +
+  geom_text(aes(label=paste('$',-net)),nudge_y=40) +
+  labs(x="",y="Total Kroger Spend ($)") +
+  theme_bridge() +
+  theme(axis.text.x=element_text(angle=0,hjust=.5))
+
+krogchange.plot
+
+```
+
+### OG Might Just Be the Winner Here
+
+```{r oginc}
+
+#build table with data to plot
+oginc <- tribble(
+  ~period, ~type, ~net,
+  "8wks prior", "my spend", 0,
+  "8wks prior", "guest spend", 0,
+  "pasta pass", "my spend", 100 + sum(cost$Extra),
+  "pasta pass", "guest spend", sum(guests$Guest_Cost,na.rm=T)
+  )
+
+oginc.plot <- oginc %>% ggplot(aes(x=period,y=net,fill=type)) +
+  geom_bar(stat="identity") +
+  annotate("text", label = as.money(sum(guests$Guest_Cost,na.rm=T)+sum(cost$Extra)+100), x = 2, y = 380) +
+  annotate("text",label = as.money(0), x = 1, y = 10) +
+  labs(x="",y="Total OG Spend ($)",fill="") +
+  theme_bridge() +
+  theme(legend.title = element_blank(),
+        axis.text.x=element_text(angle=0,hjust=.5)) +
+  scale_fill_manual(values=c("dimgray","gray"))
+
+oginc.plot
+
+```
